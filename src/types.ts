@@ -1,98 +1,197 @@
 export type SpeedModeName = 'CRAWL' | 'CRUISE' | 'WARP';
+export type DeviceModeName = 'Balanced' | 'Detail' | 'Max' | 'Cool';
+export type WaterType = 'Clear' | 'Coastal' | 'Murky';
+export type UnitsMode = 'metric' | 'imperial';
 
-export interface SpeedMode {
-  name: SpeedModeName;
-  vmin: number;
-  vmax: number;
-  slider01: number;
-  accelTau: number;
-  brake: boolean;
-}
-
-export interface WorldPos {
-  lat: number; // degrees
-  lon: number; // degrees
-  h: number; // metres (0 = sea level, negative = depth)
-}
-
-export interface CameraState {
-  lat: number;
-  lon: number;
-  h: number; // metres
-  pitch: number; // radians
-  yaw: number; // radians
-  roll: number; // radians
-  hFov: number; // degrees (80 - 120)
-  speedMode: SpeedModeName;
-  sliders: Record<SpeedModeName, number>; // 0 to 1
-  inertia: number; // 0 to 1
-  proximityBrake: boolean;
-  ghostMode: boolean;
-}
-
-export interface TorchState {
-  on: boolean;
-  power: 'Low' | 'Std' | 'Search' | 'Flood';
-  color: 'White' | 'Blue-Green' | 'Red';
-  focus: number; // inner/outer spread
-  glowSticksCount: number;
-  strobeBeacon: boolean;
-}
-
-export interface SonarState {
-  active: boolean;
-  surveyView: boolean;
-  range: number;
-  hydrophone: boolean;
-}
-
-export interface ViewState {
-  projection: 'Rectilinear' | 'Panini' | 'Stereographic';
-  vignette: boolean;
-  timeOfDay: number; // 0 to 24 hours
-  seaLevel: number; // -130 to +70 metres
-  verticalExaggeration: number; // 1 to 10
-  waterType: 'Clear' | 'Coastal' | 'Murky';
-}
+export type DestinationCategory =
+  | 'famous'
+  | 'canyon_trench'
+  | 'caves'
+  | 'wrecks'
+  | 'reefs'
+  | 'vents'
+  | 'south_africa'
+  | 'open_ocean';
 
 export interface Destination {
   id: string;
   title: string;
-  hook: string;
-  expect: string;
-  stats: {
-    depthM: number;
-    lightLevel: number; // 0 to 5
-    dread: number; // 1 to 5
-    scale: string;
-  };
-  bestFor: string[];
-  start: {
-    lat: number;
-    lon: number;
-    h: number;
-    heading: number;
-  };
-  suggested: {
-    mode: SpeedModeName;
-    torch: 'Low' | 'Std' | 'Search' | 'Flood';
-    timeOfDay: string;
-    fov: number;
-  };
-  tags: string[];
-  note?: string | null;
+  region: string;
+  category: DestinationCategory;
+  subtitle: string;
+  lat: number;
+  lon: number;
+  startDepthM: number;
+  seabedDepthM: number;
+  lightLevel: 'sunlit' | 'twilight' | 'midnight';
+  dreadLevel: 1 | 2 | 3 | 4 | 5;
+  warGrave?: boolean;
+  note?: string;
+  waterType?: WaterType;
 }
 
 export interface FeatureRecord {
   id: string;
-  type: 'wreck' | 'cave' | 'blue_hole' | 'reef' | 'cold_coral' | 'vent' | 'seamount' | 'named_feature';
+  type: string;
   name: string;
   lat: number;
   lon: number;
   depthM: number;
   dims?: { lengthM: number; beamM: number };
-  confidence: 'exact' | 'approx' | 'legendary' | 'procedural';
-  source?: string;
+  confidence: 'exact' | 'approx' | 'legendary';
+  source: string;
   tags?: string[];
   notes?: string;
+}
+
+export interface SpeciesRecord {
+  aphiaId: number;
+  sci: string;
+  common: string;
+  sizeM: { min: number; typ: number; max: number };
+  depthM: { min: number; typMax: number; max: number };
+  habitat: string[];
+  behavior: string;
+  palette: string;
+  densityPerCell: number;
+  eyeshine: boolean;
+  biolum: boolean;
+}
+
+export interface Reach {
+  omni: number;
+  cone: number;
+  coarse: number;
+  coneHalfAngle: number;
+  sunlightFraction: number;
+}
+
+export interface SonarState {
+  active: boolean;
+  originX: number;
+  originZ: number;
+  radius: number;
+  startTimeSec: number;
+  surveyView: boolean;
+}
+
+export interface DeviceBudget {
+  name: DeviceModeName;
+  targetFps: number;
+  initialRenderScale: number;
+  clipmapN: number;
+  clipmapRings: number;
+  beamSteps: 0 | 4 | 6;
+  snowCount: number;
+  caustics: boolean;
+  maxDpr: number;
+}
+
+export interface PointerVisual {
+  id: number;
+  role: 'stick' | 'lever' | 'look';
+  x: number;
+  y: number;
+  originX: number;
+  originY: number;
+}
+
+export interface InputState {
+  move: { x: number; y: number };
+  vert: number;
+  vertLatched: boolean;
+  lookDx: number;
+  lookDy: number;
+  pinchDelta: number;
+  stickActive: boolean;
+  stickBaseX: number;
+  stickBaseY: number;
+  stickKnobX: number;
+  stickKnobY: number;
+  leverActive: boolean;
+  lastTouchMs: number;
+  torchToggle: boolean;
+  sonarPulse: boolean;
+  pointers: PointerVisual[];
+}
+
+export interface GovernorTelemetry {
+  fps: number;
+  targetFps: number;
+  tickHz: number;
+  bottleneck: 'BALANCED' | 'CPU' | 'GPU';
+  mode: DeviceModeName;
+  renderScale: number;
+  emaFrameMs: number;
+  emaSubmitMs: number;
+  throttled: boolean;
+  triangles: number;
+  calls: number;
+  clipmapN: number;
+  activeRings: number;
+  visibleSectors: number;
+  cell0Meters: number;
+  reachOmni: number;
+  reachCone: number;
+}
+
+export interface HudSnapshot {
+  lat: number;
+  lon: number;
+  depthM: number;
+  seabedDepthM: number;
+  yawDeg: number;
+  pitchDeg: number;
+  hFov: number;
+  pressureAtm: number;
+  waterTempC: number;
+  zoneName: string;
+  speedMode: SpeedModeName;
+  speedSlider: number;
+  speedMs: number;
+  speedComparison: string;
+  units: UnitsMode;
+  torchOn: boolean;
+  torchPower: 'Low' | 'Std' | 'Search' | 'Flood';
+  torchColor: 'White' | 'Blue-Green' | 'Red';
+  torchFocus: number;
+  stickActive: boolean;
+  stickBaseX: number;
+  stickBaseY: number;
+  stickKnobX: number;
+  stickKnobY: number;
+  vertInput: number;
+  vertLatched: boolean;
+  leftHanded: boolean;
+  idleSeconds: number;
+  nearFeatureName: string | null;
+  nearFeatureDistM: number | null;
+  nearFeatureNote: string | null;
+  overlays: {
+    perfGraph: boolean;
+    scaleCubes: boolean;
+    torchGizmo: boolean;
+    pointerVis: boolean;
+    wireframe: boolean;
+    disableMicroDetail: boolean;
+    disableSnow: boolean;
+    disableTorchVolume: boolean;
+    disableActors: boolean;
+  };
+  governor: GovernorTelemetry;
+  pointers: PointerVisual[];
+}
+
+export interface SoakEntry {
+  minute: number;
+  timestampIso: string;
+  fpsAvg: number;
+  emaFrameMs: number;
+  emaSubmitMs: number;
+  renderScale: number;
+  clipmapN: number;
+  throttled: boolean;
+  depthM: number;
+  lat: number;
+  lon: number;
 }

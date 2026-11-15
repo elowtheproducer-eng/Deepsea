@@ -1,180 +1,428 @@
 /**
- * Debug & Tuning Panel (§20.3) - Live constants tuning, telemetry, teleports, and test overrides.
+ * Hidden Debug & Tuning Panel (§20.3 & v2.1 §6 / v2.2 §8).
+ * Reached via 1.5s long-press on the top-right Menu button or Quick Wheel -> SYSTEM.
+ * Zero backdrop-blur (opaque surface over WebGL), touch-scrollable.
  */
 
-import React, { useState } from 'react';
-import { CameraState, ViewState, TorchState } from '../types';
+import React, { useState, useSyncExternalStore } from 'react';
+import { Download, RotateCcw, X, Copy, Check } from 'lucide-react';
+import { CONFIG, resetConfig } from '../core/config';
+import {
+  getHudSnapshot,
+  governor,
+  notifyHudImmediate,
+  STATE,
+  subscribeHud,
+  teleportTo,
+} from '../core/state';
+import { DeviceModeName } from '../types';
+import { triggerHaptic } from '../input/touchControls';
+
+type DebugTab = 'overlays' | 'tuning' | 'teleport' | 'soak';
 
 interface DebugTuningPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  cameraState: CameraState;
-  setCameraState: React.Dispatch<React.SetStateAction<CameraState>>;
-  viewState: ViewState;
-  setViewState: React.Dispatch<React.SetStateAction<ViewState>>;
-  torchState: TorchState;
-  setTorchState: React.Dispatch<React.SetStateAction<TorchState>>;
+  onApplyTerrainWireframe: (wireframe: boolean) => void;
 }
 
 export const DebugTuningPanel: React.FC<DebugTuningPanelProps> = ({
   isOpen,
   onClose,
-  cameraState,
-  setCameraState,
-  viewState,
-  setViewState,
-  torchState,
-  setTorchState,
+  onApplyTerrainWireframe,
 }) => {
+  const [tab, setTab] = useState<DebugTab>('overlays');
+  const [, bump] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const hud = useSyncExternalStore(subscribeHud, getHudSnapshot, getHudSnapshot);
+
+  const [tpLat, setTpLat] = useState(hud.lat.toFixed(5));
+  const [tpLon, setTpLon] = useState(hud.lon.toFixed(5));
+  const [tpDepth, setTpDepth] = useState(Math.round(hud.depthM).toString());
+
   if (!isOpen) return null;
 
-  const [activeTab, setActiveTab] = useState<'tuning' | 'teleport' | 'telemetry'>('tuning');
-  const [teleportLat, setTeleportLat] = useState(cameraState.lat.toString());
-  const [teleportLon, setTeleportLon] = useState(cameraState.lon.toString());
-  const [teleportDepth, setTeleportDepth] = useState((-cameraState.h).toString());
+  const refresh = () => {
+    notifyHudImmediate();
+    bump((n) => n + 1);
+  };
 
-  const handleTeleport = () => {
-    const lat = parseFloat(teleportLat);
-    const lon = parseFloat(teleportLon);
-    const depth = parseFloat(teleportDepth);
-    if (!isNaN(lat) && !isNaN(lon) && !isNaN(depth)) {
-      setCameraState((s) => ({
-        ...s,
-        lat: Math.max(-90, Math.min(90, lat)),
-        lon: Math.max(-180, Math.min(180, lon)),
-        h: -depth,
-      }));
+  const toggleOverlay = (key: keyof typeof STATE.overlays) => {
+    STATE.overlays[key] = !STATE.overlays[key];
+    if (key === 'wireframe') {
+      onApplyTerrainWireframe(STATE.overlays.wireframe);
+    }
+    triggerHaptic(8);
+    refresh();
+  };
+
+  const downloadJson = (filename: string, data: unknown) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const copyStateJson = async () => {
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify({ config: CONFIG, hud, soakLog: STATE.soakLog }, null, 2)
+      );
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard blocked on insecure context
     }
   };
 
+  const tuningSliders: Array<{
+    key: keyof typeof CONFIG;
+    label: string;
+    min: number;
+    max: number;
+    step: number;
+  }> = [
+    { key: 'absorbR', label: 'Red Absorption (absorbR)', min: 0.05, max: 0.9, step: 0.01 },
+    { key: 'absorbG', label: 'Green Absorption (absorbG)', min: 0.02, max: 0.4, step: 0.005 },
+    { key: 'absorbB', label: 'Blue Absorption (absorbB)', min: 0.01, max: 0.2, step: 0.002 },
+    { key: 'kdClear', label: 'Clear Water Multiplier', min: 0.4, max: 2.5, step: 0.05 },
+    { key: 'torchLumensStd', label: 'Torch Lumens (Std)', min: 15, max: 220, step: 5 },
+    { key: 'backscatterStrength', label: 'Beam Backscatter', min: 0, max: 0.25, step: 0.005 },
+    { key: 'snowDensity', label: 'Marine Snow Density', min: 0, max: 2.0, step: 0.05 },
+    { key: 'waveSteepness', label: 'Wave Steepness', min: 0.05, max: 0.75, step: 0.02 },
+    { key: 'detailAmplitude', label: 'Terrain Relief Scale', min: 0.2, max: 2.0, step: 0.05 },
+    { key: 'verticalExag', label: 'Vertical Exaggeration', min: 0.5, max: 2.5, step: 0.1 },
+    { key: 'darknessFidelity', label: 'Abyss Darkness Fidelity', min: 0, max: 1.0, step: 0.05 },
+  ];
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-6 text-slate-100">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 shadow-2xl flex flex-col max-h-[85vh]">
+    <div
+      data-ui-interactive="true"
+      className="fixed inset-0 z-50 bg-black/95 text-slate-100 flex flex-col p-4"
+      style={{
+        paddingTop: 'max(14px, env(safe-area-inset-top))',
+        paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
+      }}
+    >
+      <div className="max-w-4xl w-full mx-auto flex flex-col flex-1 min-h-0 bg-slate-950 border border-white/15 rounded-2xl overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <div>
-            <h2 className="text-lg font-bold text-white tracking-tight">Debug & Tuning Panel (§20.3)</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Live tuning constants, telemetry, and teleports.</p>
+            <h2 className="text-base font-bold text-white">Engineering Tuning & Diagnostics</h2>
+            <p className="text-xs font-mono-tabular text-slate-400">
+              {hud.governor.fps} fps · {hud.governor.mode} · scale {hud.governor.renderScale} · N={hud.governor.clipmapN}
+            </p>
           </div>
           <button
+            aria-label="Close diagnostics"
             onClick={onClose}
-            className="px-3 py-1 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+            className="min-w-[48px] min-h-[48px] px-3 rounded-xl bg-slate-900 border border-white/10 text-slate-100 flex items-center gap-1.5 text-xs font-semibold"
           >
-            Close
+            <X className="w-4 h-4" />
+            <span>Close</span>
           </button>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 py-4 border-b border-slate-800">
-          {(['tuning', 'teleport', 'telemetry'] as const).map((tab) => (
+        <div className="flex items-center gap-1.5 px-4 py-2.5 border-b border-white/10 overflow-x-auto">
+          {(
+            [
+              { id: 'overlays', label: 'Overlays & Modes' },
+              { id: 'tuning', label: 'Optics & Terrain' },
+              { id: 'teleport', label: 'Teleport' },
+              { id: 'soak', label: 'Soak & Export' },
+            ] as Array<{ id: DebugTab; label: string }>
+          ).map((t) => (
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 text-xs font-semibold rounded-lg capitalize transition-colors ${
-                activeTab === tab
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'bg-slate-950/60 text-slate-400 hover:text-white hover:bg-slate-800'
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`min-h-[44px] px-3.5 rounded-xl text-xs font-semibold whitespace-nowrap ${
+                tab === t.id
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-slate-900 text-slate-300 border border-white/10'
               }`}
             >
-              {tab}
+              {t.label}
             </button>
           ))}
         </div>
 
-        {/* Tab Content */}
-        <div className="flex-1 overflow-y-auto py-4 space-y-6">
-          {activeTab === 'tuning' && (
+        {/* Content */}
+        <div className="scrollable-modal flex-1 overflow-y-auto p-4 space-y-4">
+          {tab === 'overlays' && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-sky-400">Flight & Physics Tuning</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-slate-300">
-                  <span>Camera Inertia (Damping)</span>
-                  <span>{cameraState.inertia.toFixed(2)}</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={cameraState.inertia}
-                  onChange={(e) =>
-                    setCameraState((s) => ({ ...s, inertia: parseFloat(e.target.value) }))
-                  }
-                  className="w-full accent-sky-500"
-                />
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {(
+                  [
+                    { key: 'perfGraph', label: 'Perf & Photon Overlay' },
+                    { key: 'scaleCubes', label: '1m / 10m Scale Cubes' },
+                    { key: 'torchGizmo', label: 'Torch Cone Gizmo' },
+                    { key: 'pointerVis', label: 'Touch Pointer Vis' },
+                    { key: 'wireframe', label: 'Terrain Wireframe' },
+                    { key: 'disableMicroDetail', label: 'Disable Micro Detail' },
+                    { key: 'disableSnow', label: 'Disable Marine Snow' },
+                    { key: 'disableTorchVolume', label: 'Disable Torch Volume' },
+                    { key: 'disableActors', label: 'Disable Fauna Actors' },
+                  ] as Array<{ key: keyof typeof STATE.overlays; label: string }>
+                ).map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => toggleOverlay(item.key)}
+                    className={`min-h-[48px] px-3 rounded-xl border text-xs font-semibold text-left ${
+                      STATE.overlays[item.key]
+                        ? 'bg-sky-600 border-sky-400 text-white'
+                        : 'bg-slate-900 border-white/10 text-slate-300'
+                    }`}
+                  >
+                    {item.label}: {STATE.overlays[item.key] ? 'ON' : 'OFF'}
+                  </button>
+                ))}
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-slate-300">
-                  <span>Sea Level Offset ({viewState.seaLevel}m)</span>
-                  <span>{viewState.seaLevel}m</span>
+              <div className="space-y-2 pt-2 border-t border-white/10">
+                <div className="text-xs font-semibold text-slate-300">Force Redmi Device Budget Mode</div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {(['Balanced', 'Detail', 'Max', 'Cool'] as DeviceModeName[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        governor.setMode(m);
+                        refresh();
+                      }}
+                      className={`min-h-[48px] rounded-xl text-xs font-semibold ${
+                        governor.mode === m
+                          ? 'bg-sky-600 text-white'
+                          : 'bg-slate-900 text-slate-300 border border-white/10'
+                      }`}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => {
+                      governor.setFrozen(!governor.frozen);
+                      refresh();
+                    }}
+                    className={`min-h-[48px] rounded-xl text-xs font-semibold ${
+                      governor.frozen
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-slate-900 text-slate-300 border border-white/10'
+                    }`}
+                  >
+                    {governor.frozen ? 'Governor FROZEN' : 'Governor AUTO'}
+                  </button>
                 </div>
-                <input
-                  type="range"
-                  min="-130"
-                  max="70"
-                  step="5"
-                  value={viewState.seaLevel}
-                  onChange={(e) =>
-                    setViewState((s) => ({ ...s, seaLevel: parseFloat(e.target.value) }))
-                  }
-                  className="w-full accent-sky-500"
-                />
               </div>
-            </div>
-          )}
 
-          {activeTab === 'teleport' && (
-            <div className="space-y-4 max-w-md">
-              <h3 className="text-sm font-semibold text-sky-400">Coordinates Teleport</h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Latitude (-90 to 90)</label>
-                  <input
-                    type="text"
-                    value={teleportLat}
-                    onChange={(e) => setTeleportLat(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Longitude (-180 to 180)</label>
-                  <input
-                    type="text"
-                    value={teleportLon}
-                    onChange={(e) => setTeleportLon(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Depth (meters below sea level)</label>
-                  <input
-                    type="text"
-                    value={teleportDepth}
-                    onChange={(e) => setTeleportDepth(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white"
-                  />
-                </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-white/10">
                 <button
-                  onClick={handleTeleport}
-                  className="w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-lg transition-colors"
+                  onClick={() => {
+                    STATE.settings.fixedStick = !STATE.settings.fixedStick;
+                    refresh();
+                  }}
+                  className="min-h-[48px] px-3 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold"
                 >
-                  Teleport Now
+                  Fixed Stick: {STATE.settings.fixedStick ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => {
+                    STATE.settings.pinchFov = !STATE.settings.pinchFov;
+                    refresh();
+                  }}
+                  className="min-h-[48px] px-3 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold"
+                >
+                  Pinch FOV: {STATE.settings.pinchFov ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => {
+                    STATE.settings.gyroLook = !STATE.settings.gyroLook;
+                    refresh();
+                  }}
+                  className="min-h-[48px] px-3 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold"
+                >
+                  Gyro Look: {STATE.settings.gyroLook ? 'ON' : 'OFF'}
+                </button>
+                <button
+                  onClick={() => {
+                    STATE.settings.audio = !STATE.settings.audio;
+                    refresh();
+                  }}
+                  className="min-h-[48px] px-3 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold"
+                >
+                  Audio: {STATE.settings.audio ? 'ON' : 'OFF'}
                 </button>
               </div>
             </div>
           )}
 
-          {activeTab === 'telemetry' && (
-            <div className="space-y-4 font-mono text-xs text-slate-300">
-              <h3 className="text-sm font-semibold text-sky-400 font-sans">Live System Telemetry</h3>
-              <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-                <div>Latitude: {cameraState.lat.toFixed(6)}°</div>
-                <div>Longitude: {cameraState.lon.toFixed(6)}°</div>
-                <div>Altitude/Depth: {cameraState.h.toFixed(2)}m</div>
-                <div>Speed Mode: {cameraState.speedMode}</div>
-                <div>Current Slider: {(cameraState.sliders[cameraState.speedMode] * 100).toFixed(1)}%</div>
-                <div>Torch: {torchState.on ? 'ACTIVE' : 'OFF'}</div>
+          {tab === 'tuning' && (
+            <div className="space-y-3">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    resetConfig();
+                    refresh();
+                  }}
+                  className="min-h-[44px] px-3.5 rounded-xl bg-slate-900 border border-white/10 text-xs font-semibold text-amber-300 flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Defaults</span>
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {tuningSliders.map((s) => (
+                  <div key={s.key} className="bg-black border border-white/10 rounded-xl p-3 space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-300">{s.label}</span>
+                      <span className="font-mono-tabular text-sky-300">
+                        {Number(CONFIG[s.key]).toFixed(3)}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={s.min}
+                      max={s.max}
+                      step={s.step}
+                      value={CONFIG[s.key]}
+                      onChange={(e) => {
+                        (CONFIG[s.key] as number) = parseFloat(e.target.value);
+                        refresh();
+                      }}
+                      className="touch-slider w-full"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === 'teleport' && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label className="block space-y-1 text-xs">
+                  <span className="text-slate-400">Latitude (°)</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={tpLat}
+                    onChange={(e) => setTpLat(e.target.value)}
+                    className="w-full min-h-[48px] px-3 rounded-xl bg-black border border-white/15 text-white font-mono-tabular"
+                  />
+                </label>
+                <label className="block space-y-1 text-xs">
+                  <span className="text-slate-400">Longitude (°)</span>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={tpLon}
+                    onChange={(e) => setTpLon(e.target.value)}
+                    className="w-full min-h-[48px] px-3 rounded-xl bg-black border border-white/15 text-white font-mono-tabular"
+                  />
+                </label>
+                <label className="block space-y-1 text-xs">
+                  <span className="text-slate-400">Depth (m below sea level)</span>
+                  <input
+                    type="number"
+                    step="1"
+                    value={tpDepth}
+                    onChange={(e) => setTpDepth(e.target.value)}
+                    className="w-full min-h-[48px] px-3 rounded-xl bg-black border border-white/15 text-white font-mono-tabular"
+                  />
+                </label>
+              </div>
+              <button
+                onClick={() => {
+                  const lat = parseFloat(tpLat);
+                  const lon = parseFloat(tpLon);
+                  const depth = parseFloat(tpDepth);
+                  if (Number.isFinite(lat) && Number.isFinite(lon) && Number.isFinite(depth)) {
+                    teleportTo(lat, lon, depth);
+                    onClose();
+                  }
+                }}
+                className="min-h-[48px] px-5 rounded-xl bg-sky-600 text-white text-xs font-semibold"
+              >
+                Teleport Now
+              </button>
+
+              <div className="pt-2 border-t border-white/10 space-y-2">
+                <div className="text-xs text-slate-400">Quick Presets</div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { name: "Dean's Surface", lat: 23.10639, lon: -75.00861, depth: -30.48 },
+                    { name: "Dean's 150m Shaft", lat: 23.10639, lon: -75.00861, depth: 150 },
+                    { name: 'Challenger Deep', lat: 11.373, lon: 142.591, depth: 10840 },
+                    { name: 'RMS Titanic', lat: 41.73, lon: -49.95, depth: 3765 },
+                    { name: 'Great Barrier Reef', lat: -18.287, lon: 147.699, depth: 6 },
+                  ].map((p) => (
+                    <button
+                      key={p.name}
+                      onClick={() => {
+                        teleportTo(p.lat, p.lon, p.depth);
+                        onClose();
+                      }}
+                      className="min-h-[44px] px-3 rounded-xl bg-slate-900 border border-white/10 text-xs text-slate-200"
+                    >
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'soak' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => downloadJson('deep-ocean-soak-log.json', STATE.soakLog)}
+                  className="min-h-[48px] px-4 rounded-xl bg-sky-600 text-white text-xs font-semibold flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Export Soak Log JSON ({STATE.soakLog.length} min)</span>
+                </button>
+                <button
+                  onClick={() =>
+                    downloadJson('deep-ocean-state.json', { config: CONFIG, hud, soakLog: STATE.soakLog })
+                  }
+                  className="min-h-[48px] px-4 rounded-xl bg-slate-900 border border-white/10 text-slate-200 text-xs font-semibold flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Export Config & State JSON</span>
+                </button>
+                <button
+                  onClick={copyStateJson}
+                  className="min-h-[48px] px-4 rounded-xl bg-slate-900 border border-white/10 text-slate-200 text-xs font-semibold flex items-center gap-2"
+                >
+                  {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  <span>{copied ? 'Copied JSON' : 'Copy State JSON'}</span>
+                </button>
+              </div>
+
+              <div className="bg-black border border-white/10 rounded-xl p-3 font-mono-tabular text-[11px] text-slate-300 space-y-1">
+                <div>Session elapsed: {Math.round((performance.now() - STATE.sessionStartMs) / 1000)} s</div>
+                <div>
+                  Bottleneck: {hud.governor.bottleneck} · EMA frame: {hud.governor.emaFrameMs.toFixed(2)} ms ·
+                  Submit: {hud.governor.emaSubmitMs.toFixed(2)} ms
+                </div>
+                {STATE.soakLog.length === 0 ? (
+                  <div className="text-slate-500 pt-1">
+                    1-minute soak entries appear automatically after each minute of continuous flight.
+                  </div>
+                ) : (
+                  <div className="pt-2 space-y-1 max-h-48 overflow-y-auto">
+                    {STATE.soakLog.map((entry) => (
+                      <div key={entry.minute} className="text-emerald-300">
+                        min {entry.minute}: {entry.fpsAvg} fps · frame {entry.emaFrameMs.toFixed(1)}ms · scale{' '}
+                        {entry.renderScale} · N={entry.clipmapN} · depth {Math.round(entry.depthM)}m
+                        {entry.throttled ? ' · THROTTLED' : ''}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
