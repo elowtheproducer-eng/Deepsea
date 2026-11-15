@@ -86,6 +86,7 @@ export default function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [contextLost, setContextLost] = useState(false);
+  const [bootError, setBootError] = useState<string | null>(null);
 
   const pausedRef = useRef(!autostart);
   const actionsRef = useRef<{
@@ -150,21 +151,31 @@ export default function App() {
       return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
     })();
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-      alpha: false,
-      stencil: false,
-      preserveDrawingBuffer: false,
+    const getViewportSize = () => ({
+      w: Math.max(1, container.clientWidth || window.innerWidth || 915),
+      h: Math.max(1, container.clientHeight || window.innerHeight || 412),
     });
+
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+        alpha: false,
+        stencil: false,
+        preserveDrawingBuffer: false,
+      });
+    } catch (err) {
+      setBootError(err instanceof Error ? err.message : 'Unable to initialize WebGL2 renderer.');
+      return;
+    }
     renderer.setClearColor(0x000000, 1);
     renderer.shadowMap.enabled = false;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.info.autoReset = false;
 
     const applyRendererResolution = () => {
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
+      const { w, h } = getViewportSize();
       const dpr = isSoftwareGl
         ? 1
         : Math.min(window.devicePixelRatio || 1, 2.0) * governor.renderScale;
@@ -181,7 +192,8 @@ export default function App() {
     const scene = new THREE.Scene();
     scene.matrixWorldAutoUpdate = false;
 
-    const aspect = (container.clientWidth || window.innerWidth) / Math.max(1, container.clientHeight || window.innerHeight);
+    const initialSize = getViewportSize();
+    const aspect = initialSize.w / initialSize.h;
     const camera = new THREE.PerspectiveCamera(
       computeVerticalFovDeg(STATE.cam.hFov, aspect),
       aspect,
@@ -213,21 +225,27 @@ export default function App() {
     const glowMat = new THREE.MeshBasicMaterial({ color: 0x34d399 });
     const glowSticks: Array<{ mesh: THREE.Mesh; east: number; y: number; north: number }> = [];
 
-    // Audio & TileWorker (#2)
+    // Audio & TileWorker (#2, guarded for restricted WebAPK environments)
     const audio = new OceanAudioEngine();
-    const tileWorker = new Worker(new URL('./workers/tileWorker.ts', import.meta.url), {
-      type: 'module',
-    });
+    let tileWorker: Worker | null = null;
+    try {
+      tileWorker = new Worker(new URL('./workers/tileWorker.ts', import.meta.url), {
+        type: 'module',
+      });
+      tileWorker.onmessage = (e) => {
+        const d = e.data;
+        if (typeof d.seabedY === 'number') {
+          STATE.seabedDepthM = STATE.view.seaLevel - d.seabedY;
+        }
+        if (d.nearestFeature) {
+          STATE.nearFeature = d.nearestFeature;
+        }
+      };
+      tileWorker.onerror = () => {};
+    } catch {
+      tileWorker = null;
+    }
     let nextTileReqId = 1;
-    tileWorker.onmessage = (e) => {
-      const d = e.data;
-      if (typeof d.seabedY === 'number') {
-        STATE.seabedDepthM = STATE.view.seaLevel - d.seabedY;
-      }
-      if (d.nearestFeature) {
-        STATE.nearFeature = d.nearestFeature;
-      }
-    };
 
     // Context loss safety
     const onContextLost = (e: Event) => {
@@ -272,9 +290,8 @@ export default function App() {
 
     const onResize = () => {
       applyRendererResolution();
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
-      camera.aspect = w / Math.max(1, h);
+      const { w, h } = getViewportSize();
+      camera.aspect = w / h;
       camera.fov = computeVerticalFovDeg(STATE.cam.hFov, camera.aspect);
       camera.updateProjectionMatrix();
     };
@@ -411,7 +428,8 @@ export default function App() {
         input.pinchDelta = 0;
       }
 
-      const curAsp = (container.clientWidth || window.innerWidth) / Math.max(1, container.clientHeight || window.innerHeight);
+      const vp = getViewportSize();
+      const curAsp = vp.w / vp.h;
       const targetVFov = computeVerticalFovDeg(STATE.cam.hFov, curAsp);
       if (Math.abs(camera.fov - targetVFov) > 0.05) {
         camera.fov = targetVFov;
@@ -661,16 +679,21 @@ export default function App() {
       // Periodic off-thread TileWorker query (~1 Hz)
       if (nowMs - lastTileQueryMs > 950) {
         lastTileQueryMs = nowMs;
-        const ll = localMetersToLatLon(STATE.originLat, STATE.originLon, STATE.camEast, STATE.camNorth);
-        tileWorker.postMessage({
-          requestId: nextTileReqId++,
-          lat: ll.lat,
-          lon: ll.lon,
-          camEast: STATE.camEast,
-          camNorth: STATE.camNorth,
-          originLat: STATE.originLat,
-          originLon: STATE.originLon,
-        });
+        if (tileWorker) {
+          const ll = localMetersToLatLon(STATE.originLat, STATE.originLon, STATE.camEast, STATE.camNorth);
+          tileWorker.postMessage({
+            requestId: nextTileReqId++,
+            lat: ll.lat,
+            lon: ll.lon,
+            camEast: STATE.camEast,
+            camNorth: STATE.camNorth,
+            originLat: STATE.originLat,
+            originLon: STATE.originLon,
+          });
+        } else {
+          const groundY = heightAt(STATE.camEast, STATE.camNorth, STATE.originLat, STATE.originLon, 6);
+          STATE.seabedDepthM = STATE.view.seaLevel - groundY;
+        }
       }
 
       // Single tile-friendly render pass
@@ -771,7 +794,7 @@ export default function App() {
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
       renderer.domElement.removeEventListener('webglcontextrestored', onContextRestored);
       wakeLock?.release().catch(() => {});
-      tileWorker.terminate();
+      tileWorker?.terminate();
       audio.dispose();
       clipmap.dispose();
       ocean.dispose();
@@ -793,6 +816,12 @@ export default function App() {
     setShowExpeditionBoard(false);
     actionsRef.current.unlockAudio();
     actionsRef.current.renderOneFrame();
+    try {
+      const orientation = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+      orientation?.lock?.('landscape')?.catch(() => {});
+    } catch {
+      // Orientation lock is optional and unsupported in some standalone launchers
+    }
   };
 
   return (
@@ -862,6 +891,22 @@ export default function App() {
             <p className="text-xs text-slate-400">
               Restoring WebGL2 ocean renderer automatically.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Boot Error Recovery */}
+      {bootError && (
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center p-6 text-center">
+          <div className="max-w-sm bg-slate-950 border border-white/15 rounded-2xl p-5 space-y-3">
+            <h2 className="text-base font-bold text-white">Renderer Unavailable</h2>
+            <p className="text-xs text-slate-300">{bootError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="min-h-[48px] px-5 rounded-xl bg-sky-600 text-white text-xs font-semibold"
+            >
+              Retry Launch
+            </button>
           </div>
         </div>
       )}

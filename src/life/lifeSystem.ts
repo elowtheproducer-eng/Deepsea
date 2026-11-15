@@ -163,7 +163,7 @@ export class LifeSystem {
   private fishData = new Float32Array(0);
   private fishCount = 0;
 
-  private worker: Worker;
+  private worker: Worker | null = null;
   private pendingRequest = false;
   private nextRequestId = 1;
   private lastSpawnEast = 1e9;
@@ -237,21 +237,28 @@ export class LifeSystem {
     this.torchGizmo.visible = false;
     this.group.add(this.torchGizmo);
 
-    // Web Worker #1: SpawnWorker
-    this.worker = new Worker(new URL('../workers/spawnWorker.ts', import.meta.url), {
-      type: 'module',
-    });
-    this.worker.onmessage = (e) => {
-      this.pendingRequest = false;
-      const d = e.data;
-      this.rockData = d.rocks;
-      this.rockCount = d.rockCount;
-      this.coralData = d.corals;
-      this.coralCount = d.coralCount;
-      this.fishData = d.fish;
-      this.fishCount = d.fishCount;
-      this.applyStaticBuffers(d.camEast, d.camNorth);
-    };
+    // Web Worker #1: SpawnWorker (guarded for WebAPK/restricted WebViews)
+    try {
+      this.worker = new Worker(new URL('../workers/spawnWorker.ts', import.meta.url), {
+        type: 'module',
+      });
+      this.worker.onmessage = (e) => {
+        this.pendingRequest = false;
+        const d = e.data;
+        this.rockData = d.rocks;
+        this.rockCount = d.rockCount;
+        this.coralData = d.corals;
+        this.coralCount = d.coralCount;
+        this.fishData = d.fish;
+        this.fishCount = d.fishCount;
+        this.applyStaticBuffers(d.camEast, d.camNorth);
+      };
+      this.worker.onerror = () => {
+        this.pendingRequest = false;
+      };
+    } catch {
+      this.worker = null;
+    }
   }
 
   private applyStaticBuffers(camEast: number, camNorth: number) {
@@ -371,7 +378,7 @@ export class LifeSystem {
 
     // Trigger SpawnWorker when camera moves > 12 m from last spawn center
     const moved = Math.hypot(camEast - this.lastSpawnEast, camNorth - this.lastSpawnNorth);
-    if (!this.pendingRequest && moved > 12.0) {
+    if (this.worker && !this.pendingRequest && moved > 12.0) {
       this.pendingRequest = true;
       this.lastSpawnEast = camEast;
       this.lastSpawnNorth = camNorth;
@@ -459,7 +466,7 @@ export class LifeSystem {
   }
 
   dispose() {
-    this.worker.terminate();
+    this.worker?.terminate();
     this.rocksMesh.geometry.dispose();
     this.rockMat.dispose();
     this.coralsMesh.geometry.dispose();
