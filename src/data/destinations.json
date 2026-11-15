@@ -1,0 +1,74 @@
+[
+  {
+    "id": "dest:surface",
+    "title": "Open Ocean Surface Start",
+    "hook": "Start 100 ft above the swells and fall through the waves.",
+    "expect": "Watch the light change as you sink: red vanishes in the first 15 m, blue fades to black by a few hundred metres. A good first dive.",
+    "stats": { "depthM": -30.48, "lightLevel": 5, "dread": 1, "scale": "Open ocean" },
+    "bestFor": ["first dive", "surface"],
+    "start": { "lat": 0.0, "lon": -20.0, "h": 30.48, "heading": 0 },
+    "suggested": { "mode": "CRUISE", "torch": "Std", "timeOfDay": "12:00", "fov": 100 },
+    "tags": ["surface"],
+    "note": null
+  },
+  {
+    "id": "dest:titanic",
+    "title": "RMS Titanic",
+    "hook": "Two halves, ~600 m apart, 3.8 km down.",
+    "expect": "Total darkness, a debris field, rusticles, and marine snow. Bring the torch and move slowly.",
+    "stats": { "depthM": 3800, "lightLevel": 0, "dread": 4, "scale": "269 m length" },
+    "bestFor": ["wrecks", "deep"],
+    "start": { "lat": 41.73, "lon": -49.95, "h": -3750, "heading": 45 },
+    "suggested": { "mode": "CRAWL", "torch": "Search", "timeOfDay": "00:00", "fov": 90 },
+    "tags": ["wreck", "war_grave"],
+    "note": "War-grave-style respect applies."
+  },
+  {
+    "id": "dest:deans_blue_hole",
+    "title": "Dean's Blue Hole",
+    "hook": "A 200 m shaft into the Bahamian limestone.",
+    "expect": "Entrance 25-35 m wide, flaring to ~100 m at about 20 m depth. Light drains as you sink; walls fall away into blue-black.",
+    "stats": { "depthM": 202, "lightLevel": 2, "dread": 3, "scale": "25-100 m wide" },
+    "bestFor": ["first dive", "caves"],
+    "start": { "lat": 23.10639, "lon": -75.00861, "h": 10, "heading": 180 },
+    "suggested": { "mode": "CRAWL", "torch": "Std", "timeOfDay": "13:00", "fov": 100 },
+    "tags": ["blue_hole"],
+    "note": null
+  },
+  {
+    "id": "dest:mariana",
+    "title": "Challenger Deep (Mariana Trench)",
+    "hook": "The deepest point on Earth, ≈ 10.9 km.",
+    "expect": "Total black, silt plains, trench walls. Life is tiny and strange (hadal amphipods, snailfish). Plan to hover and listen.",
+    "stats": { "depthM": 10920, "lightLevel": 0, "dread": 5, "scale": "11 km depth" },
+    "bestFor": ["extreme", "hadal"],
+    "start": { "lat": 11.373, "lon": 142.591, "h": -10850, "heading": 90 },
+    "suggested": { "mode": "CRAWL", "torch": "Flood", "timeOfDay": "00:00", "fov": 90 },
+    "tags": ["trench"],
+    "note": null
+  },
+  {
+    "id": "dest:great_barrier_reef",
+    "title": "Great Barrier Reef",
+    "hook": "The brightest place in the app.",
+    "expect": "Shallow, sunlit, saturated colour, corals and reef fish; mapped from the Allen Coral Atlas. Proof that the ocean isn't always dark.",
+    "stats": { "depthM": 15, "lightLevel": 4, "dread": 0, "scale": "Shallow reef" },
+    "bestFor": ["reef", "shallow"],
+    "start": { "lat": -18.287, "lon": 147.699, "h": 5, "heading": 0 },
+    "suggested": { "mode": "CRUISE", "torch": "Low", "timeOfDay": "12:00", "fov": 110 },
+    "tags": ["reef"],
+    "note": null
+  },
+  {
+    "id": "dest:false_bay",
+    "title": "False Bay, Seal Island (South Africa)",
+    "hook": "Great white country.",
+    "expect": "Cold green water, fast silhouettes, and the occasional surface breach in home waters.",
+    "stats": { "depthM": 35, "lightLevel": 3, "dread": 4, "scale": "Coastal waters" },
+    "bestFor": ["wildlife", "home_waters"],
+    "start": { "lat": -34.135, "lon": 18.586, "h": 10, "heading": 220 },
+    "suggested": { "mode": "CRUISE", "torch": "Std", "timeOfDay": "10:00", "fov": 100 },
+    "tags": ["wildlife", "south_africa"],
+    "note": null
+  }
+]

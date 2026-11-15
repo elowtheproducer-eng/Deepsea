@@ -1,0 +1,6 @@
+{
+  "name": "Deep Ocean Explorer",
+  "description": "A personal, non-commercial, free-roam deep-ocean exploration app with real bathymetry and realistic optics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
